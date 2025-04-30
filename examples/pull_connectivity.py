@@ -4,6 +4,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import pyvista as pv
 import seaborn as sns
 from caveclient import CAVEclient
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -31,7 +32,75 @@ elif DATA_SOURCE == "github":
     # TODO
     cell_table = pd.read_csv("")
 
-cell_table
+
+# %%
+
+column_cell_table = cell_table.query(
+    "cell_type_source == 'allen_v1_column_types_slanted_ref'"
+).copy()
+
+column_root_ids = column_cell_table.index
+
+column_cell_table
+
+
+# %%
+
+
+fig, ax = plt.subplots(figsize=(8, 5))
+
+sns.scatterplot(
+    data=cell_table,
+    x="pt_position_x",
+    y="pt_position_z",
+    # hue="cell_type_source",
+    color="grey",
+    s=1,
+    alpha=1,
+    ax=ax,
+)
+
+sns.scatterplot(
+    data=column_cell_table,
+    x="pt_position_x",
+    y="pt_position_z",
+    hue="broad_type",
+    s=5,
+    alpha=1,
+    ax=ax,
+)
+
+# %%
+
+fig, ax = plt.subplots(figsize=(8, 5))
+sns.scatterplot(
+    data=cell_table,
+    x="pt_position_x",
+    y="pt_position_y",
+    # hue="broad_type",
+    color="dimgrey",
+    s=1,
+    alpha=1,
+    ax=ax,
+)
+
+sns.scatterplot(
+    data=column_cell_table,
+    x="pt_position_x",
+    y="pt_position_y",
+    hue="broad_type",
+    # color="dimgrey",
+    s=8,
+    alpha=1,
+    ax=ax,
+)
+ax.invert_yaxis()
+ax.axis("equal")
+sns.move_legend(
+    ax, "upper left", bbox_to_anchor=(1, 1), title="Broad Type", markerscale=5
+)
+
+
 # %%
 
 sns.set_context("talk", font_scale=1)
@@ -69,59 +138,6 @@ sns.move_legend(
 
 # %%
 
-fig, ax = plt.subplots(figsize=(8, 5))
-sns.scatterplot(
-    data=cell_table,
-    x="pt_position_x",
-    y="pt_position_z",
-    hue="visual_area",
-    # color="dimgrey",
-    s=1,
-    alpha=1,
-    ax=ax,
-)
-sns.move_legend(
-    ax, "upper left", bbox_to_anchor=(1, 1), title="Visual Area", markerscale=5
-)
-
-# %%
-column_cell_table = cell_table.query(
-    "cell_type_source == 'allen_v1_column_types_slanted_ref'"
-).copy()
-
-# %%
-
-fig, ax = plt.subplots(figsize=(8, 5))
-sns.scatterplot(
-    data=cell_table,
-    x="pt_position_x",
-    y="pt_position_y",
-    # hue="broad_type",
-    color="dimgrey",
-    s=1,
-    alpha=1,
-    ax=ax,
-)
-
-sns.scatterplot(
-    data=column_cell_table,
-    x="pt_position_x",
-    y="pt_position_y",
-    hue="broad_type",
-    # color="dimgrey",
-    s=8,
-    alpha=1,
-    ax=ax,
-)
-ax.invert_yaxis()
-ax.axis("equal")
-sns.move_legend(
-    ax, "upper left", bbox_to_anchor=(1, 1), title="Broad Type", markerscale=5
-)
-
-
-# %%
-
 fig, axs = plt.subplots(
     1, 2, figsize=(6, 5), sharex=True, sharey=True, gridspec_kw={"wspace": 1.5}
 )
@@ -156,7 +172,6 @@ ax.invert_yaxis()
 
 # %%
 
-column_root_ids = column_cell_table.index
 
 if DATA_SOURCE == "server":
     column_synapse_table = client.materialize.synapse_query(
@@ -528,3 +543,55 @@ source_root = (
 target_roots = column_cell_table.query("cell_type == @target_type").index
 
 # %%
+root_id = 864691135562001633  # example basket cell
+root_id = 864691135503182685
+client = CAVEclient(DATASTACK, version=VERSION)
+skeleton_dict = client.skeleton.get_skeleton(root_id)
+
+# %%
+pre_synapses = client.materialize.synapse_query(
+    pre_ids=root_id,
+    **query_params,
+)
+post_synapses = client.materialize.synapse_query(
+    post_ids=root_id,
+    **query_params,
+)
+# %%
+pre_synapses["post_cell_type"] = (
+    pre_synapses["post_pt_root_id"].map(cell_table["cell_type"]).fillna("unknown")
+)
+
+
+# %%
+
+vertices = skeleton_dict["vertices"]
+edges = skeleton_dict["edges"]
+lines = np.column_stack((np.full((len(edges), 1), 2), edges))
+
+skeleton_polydata = pv.PolyData(vertices, lines=lines)
+
+plotter = pv.Plotter()
+
+plotter.add_mesh(skeleton_polydata, color="black", line_width=1)
+
+plotter.add_points(
+    pre_synapses[
+        ["ctr_pt_position_x", "ctr_pt_position_y", "ctr_pt_position_z"]
+    ].values,
+    # color="coral",
+    scalars=pre_synapses["post_cell_type"],
+    # rgb=True,
+    cmap="tab20",
+    point_size=3,
+)
+
+plotter.add_points(
+    post_synapses[
+        ["ctr_pt_position_x", "ctr_pt_position_y", "ctr_pt_position_z"]
+    ].values,
+    color="",
+    point_size=3,
+)
+plotter.enable_fly_to_right_click()
+plotter.show()
