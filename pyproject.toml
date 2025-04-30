@@ -1,0 +1,16 @@
+[project]
+name = "capocaccia"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+dependencies = [
+    "caveclient[cv]>=7.7.1",
+    "ipykernel>=6.29.5",
+    "joblib>=1.4.2",
+    "nglui>=3.8.2",
+    "pyvista[all]>=0.45.0",
+    "scipy>=1.15.2",
+    "seaborn>=0.13.2",
+    "tqdm-joblib>=0.0.4",
+]
