@@ -32,6 +32,7 @@ elif DATA_SOURCE == "github":
     # TODO
     cell_table = pd.read_csv("")
 
+cell_table
 
 # %%
 
@@ -46,8 +47,11 @@ column_cell_table
 
 # %%
 
+sns.set_context("talk", font_scale=1)
+plt.rcParams["axes.spines.top"] = False
+plt.rcParams["axes.spines.right"] = False
 
-fig, ax = plt.subplots(figsize=(8, 5))
+fig, ax = plt.subplots(figsize=(8, 3))
 
 sns.scatterplot(
     data=cell_table,
@@ -68,6 +72,10 @@ sns.scatterplot(
     s=5,
     alpha=1,
     ax=ax,
+)
+ax.axis("equal")
+sns.move_legend(
+    ax, "upper left", bbox_to_anchor=(1, 1), title="Broad Type", markerscale=5
 )
 
 # %%
@@ -103,9 +111,6 @@ sns.move_legend(
 
 # %%
 
-sns.set_context("talk", font_scale=1)
-plt.rcParams["axes.spines.top"] = False
-plt.rcParams["axes.spines.right"] = False
 
 broad_type_counts = (
     cell_table.groupby("broad_type")
@@ -147,6 +152,7 @@ sns.scatterplot(
     x="pt_position_x",
     y="pt_position_y",
     hue="cell_type",
+    palette="husl",
     s=8,
     ax=ax,
 )
@@ -162,6 +168,7 @@ sns.scatterplot(
     hue="cell_type",
     s=8,
     alpha=1,
+    palette="Set1",
     ax=ax,
 )
 sns.move_legend(
@@ -171,7 +178,6 @@ ax.invert_yaxis()
 
 
 # %%
-
 
 if DATA_SOURCE == "server":
     column_synapse_table = client.materialize.synapse_query(
@@ -285,8 +291,8 @@ def sparse_adjacency_plot(
         fig, ax = plt.subplots(figsize=figsize)
 
     sns.scatterplot(
-        x=sources,
-        y=targets,
+        x=targets,
+        y=sources,
         color="black",
         ax=ax,
         legend=False,
@@ -303,19 +309,22 @@ def sparse_adjacency_plot(
     ax.set_ylim(adjacency.shape[1] - 0.5, -0.5)
 
     divider = make_axes_locatable(ax)
-    cax_left = divider.append_axes("left", size="2%", pad=0.01)
+    cax_left = divider.append_axes("left", size="5%", pad=0.01)
     cax_left.set_xticks([])
     cax_left.set_yticks([])
     cax_left.spines[["top", "right", "left", "bottom"]].set_visible(False)
     cax_left.set_ylim(ax.get_ylim())
 
-    cax_top = divider.append_axes("top", size="2%", pad=0.01)
+    cax_top = divider.append_axes("top", size="5%", pad=0.01)
     cax_top.set_xticks([])
     cax_top.set_yticks([])
     cax_top.spines[["top", "right", "left", "bottom"]].set_visible(False)
     cax_top.set_xlim(ax.get_xlim())
+    cax_top.invert_yaxis()
 
     if group_by is not None:
+        n_groups = len(group_by)
+        color_width = 1 / n_groups - 0.2 / n_groups
         for i, level in enumerate(group_by):
             starts = nodes.groupby(level)["position"].min().rename("start")
             ends = nodes.groupby(level)["position"].max().rename("end")
@@ -325,8 +334,8 @@ def sparse_adjacency_plot(
                 # add rectangle to the left for each group
                 cax_left.add_patch(
                     plt.Rectangle(
-                        (i, start),
-                        1,
+                        (i / n_groups, start),
+                        color_width,
                         end - start,
                         color=palette[group_name],
                         # color="black",
@@ -337,9 +346,9 @@ def sparse_adjacency_plot(
                 # add rectangle to the top for each group
                 cax_top.add_patch(
                     plt.Rectangle(
-                        (start, i),
+                        (start, i / n_groups),
                         end - start,
-                        1,
+                        color_width,
                         color=palette[group_name],
                         # color="black",
                         # alpha=0.2,
@@ -365,15 +374,16 @@ palette = dict(
         sns.color_palette("husl", n_colors=column_cell_table["cell_type"].nunique()),
     )
 )
+palette["excitatory"] = "lightgrey"
+palette["inhibitory"] = "black"
 
 sparse_adjacency_plot(count_adjacency)
 
-# %%
 sparse_adjacency_plot(
     count_adjacency,
     nodes=column_cell_table,
     sort_by=["broad_type", "cell_type"],
-    group_by=["cell_type"],
+    group_by=["broad_type", "cell_type"],
     ascending=True,
     palette=palette,
 )
@@ -386,6 +396,7 @@ sparse_adjacency_plot(
     group_by=["cell_type"],
     ascending=[True, True, False],
     palette=palette,
+    s=1,
 )
 
 # %%
@@ -399,7 +410,6 @@ edges = pd.DataFrame(
         "sum_synapse_size": sum_size_adjacency.values[source_ilocs, target_ilocs],
     }
 )
-
 edges["source_broad_type"] = edges["source"].map(column_cell_table["broad_type"])
 edges["target_broad_type"] = edges["target"].map(column_cell_table["broad_type"])
 edges["source_cell_type"] = edges["source"].map(column_cell_table["cell_type"])
@@ -543,7 +553,7 @@ source_root = (
 target_roots = column_cell_table.query("cell_type == @target_type").index
 
 # %%
-root_id = 864691135562001633  # example basket cell
+# root_id = 864691135562001633  # example basket cell
 root_id = 864691135503182685
 client = CAVEclient(DATASTACK, version=VERSION)
 skeleton_dict = client.skeleton.get_skeleton(root_id)
@@ -579,9 +589,8 @@ plotter.add_points(
     pre_synapses[
         ["ctr_pt_position_x", "ctr_pt_position_y", "ctr_pt_position_z"]
     ].values,
-    # color="coral",
-    scalars=pre_synapses["post_cell_type"],
-    # rgb=True,
+    color="coral",
+    # scalars=pre_synapses["post_cell_type"],
     cmap="tab20",
     point_size=3,
 )
@@ -590,8 +599,90 @@ plotter.add_points(
     post_synapses[
         ["ctr_pt_position_x", "ctr_pt_position_y", "ctr_pt_position_z"]
     ].values,
-    color="",
+    color="lightblue",
     point_size=3,
 )
 plotter.enable_fly_to_right_click()
 plotter.show()
+
+# %%
+column_synapse_table["pre_cell_type"] = (
+    column_synapse_table["pre_pt_root_id"]
+    .map(cell_table["cell_type"])
+    .fillna("unknown")
+)
+column_synapse_table["post_cell_type"] = (
+    column_synapse_table["post_pt_root_id"]
+    .map(cell_table["cell_type"])
+    .fillna("unknown")
+)
+column_synapse_table["pre_broad_type"] = (
+    column_synapse_table["pre_pt_root_id"]
+    .map(cell_table["broad_type"])
+    .fillna("unknown")
+)
+column_synapse_table["post_broad_type"] = (
+    column_synapse_table["post_pt_root_id"]
+    .map(cell_table["broad_type"])
+    .fillna("unknown")
+)
+
+source_type = "23P"
+target_type = "23P"
+sns.histplot(
+    x=column_synapse_table.query(
+        "pre_cell_type == @source_type and post_cell_type == @target_type"
+    )["size"],
+    log_scale=True,
+    bins=100,
+)
+
+# %%
+n_groups = len(column_synapse_table["post_cell_type"].unique())
+fig, axs = plt.subplots(
+    n_groups, 2, figsize=(8, 16), constrained_layout=True, sharex="col"
+)
+for i, (group, sub_synapses) in enumerate(
+    column_synapse_table.groupby("post_cell_type")
+):
+    ax = axs[i, 0]
+    sns.kdeplot(
+        data=sub_synapses,
+        x="size",
+        hue="pre_broad_type",
+        log_scale=True,
+        # bins=50,
+        ax=ax,
+        # color="coral",
+        legend=False,
+        common_norm=False,
+    )
+    # ax.set_title(group)
+    ax.set_xlabel("Synapse size")
+    ax.set_ylabel("Count")
+    ax.spines["left"].set_visible(False)
+    ax.set_yticks([])
+    ax.set_ylabel(group)
+
+    sub_edges = edges.query("target_cell_type == @group")
+    ax = axs[i, 1]
+    sns.histplot(
+        data=sub_edges,
+        x="count",
+        hue="source_broad_type",
+        log_scale=False,
+        # bins=50,
+        ax=ax,
+        # color="coral",
+        legend=False,
+        common_norm=False,
+        discrete=True,
+    )
+    ax.set_xlim(0, 10)
+    ax.set_xlabel("Count")
+    ax.set_yticks([])
+    ax.spines["left"].set_visible(False)
+    ax.set_ylabel("")
+
+
+# %%
