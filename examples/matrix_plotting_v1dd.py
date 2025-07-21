@@ -74,7 +74,6 @@ synapses = pd.concat(synapses, axis=0)
 
 
 def clear_axis(axis):
-    # axis.spines[["top", "right", "left", "bottom"]].set_visible(False)
     axis.set_xticks([])
     axis.set_yticks([])
 
@@ -241,30 +240,45 @@ def adjacencyplot(
     adjacency: Union[np.ndarray, csr_array],
     nodes: pd.DataFrame = None,
     groupby=None,
-    groupby_element="color",
-    groupby_size="1%",
+    sortby=None,
+    group_element="color",
+    group_axis_size="1%",
     node_palette=None,
-    edge_palette=None,
+    edge_palette="Greys",
     ax=None,
     figsize=(8, 8),
-    size_by_weight=False,
-    hue_by_weight=False,
-    sizes=(0.1, 10),
+    size_by_weight=True,
+    hue_by_weight=True,
+    sizes=(1, 10),
     s=0.1,
+    edge_linewidth=0.05,
+    label_fontsize="small",
     **kwargs,
 ):
-    if nodes is not None:
-        nodes = nodes.copy()
+    if nodes is None:
+        nodes = pd.DataFrame(index=np.arange(adjacency.shape[0]))
+    nodes = nodes.reset_index().copy()
+    if sortby is not None:
+        if isinstance(sortby, str):
+            sortby = [sortby]
+    else:
+        sortby = []
+    if groupby is not None:
+        if isinstance(groupby, str):
+            groupby = [groupby]
+    else:
+        groupby = []
+    sort_by = groupby + sortby
 
-    if nodes is not None:
-        nodes["position"] = np.arange(len(nodes))
+    nodes = nodes.sort_values(sort_by)
+    nodes["position"] = np.arange(len(nodes))
 
     sources, targets = np.nonzero(adjacency)
-
-    if ax is None:
-        _, ax = plt.subplots(figsize=figsize)
-
     data = adjacency[sources, targets]
+
+    # remap sources and targets to node positions
+    sources = nodes.loc[sources]["position"].values
+    targets = nodes.loc[targets]["position"].values
 
     ranked_data = rankdata(data, method="average") / len(data)
 
@@ -278,6 +292,9 @@ def adjacencyplot(
     else:
         hue = None
 
+    if ax is None:
+        _, ax = plt.subplots(figsize=figsize)
+
     sns.scatterplot(
         y=sources,
         x=targets,
@@ -289,6 +306,7 @@ def adjacencyplot(
         s=s,
         sizes=sizes,
         palette=edge_palette,
+        linewidth=edge_linewidth,
         **kwargs,
     )
 
@@ -300,18 +318,15 @@ def adjacencyplot(
 
     grid = AxisGrid(ax)
 
-    if groupby is None:
-        groupby = []
-
     # add groupby indicators starting from last to first
     for i, level in enumerate(groupby[::-1]):
         cax_left = grid.append_axes(
-            "left", size=groupby_size, pad="auto", zorder=len(groupby) - i
+            "left", size=group_axis_size, pad="auto", zorder=len(sort_by) - i
         )
         cax_top = grid.append_axes(
-            "top", size=groupby_size, pad="auto", zorder=len(groupby) - i
+            "top", size=group_axis_size, pad="auto", zorder=len(sort_by) - i
         )
-        if groupby_element == "bracket":
+        if group_element == "bracket":
             cax_left.spines[["top", "bottom", "left", "right"]].set_visible(False)
             cax_top.spines[["top", "bottom", "left", "right"]].set_visible(False)
 
@@ -321,7 +336,7 @@ def adjacencyplot(
         info = pd.concat([starts, ends], axis=1)
 
         for group_name, (start, end) in info.iterrows():
-            if groupby_element == "color":
+            if group_element == "color":
                 draw_color_box(
                     cax_left, start, end, axis="y", color=node_palette[group_name]
                 )
@@ -329,7 +344,7 @@ def adjacencyplot(
                     cax_top, start, end, axis="x", color=node_palette[group_name]
                 )
 
-            elif groupby_element == "bracket":
+            elif group_element == "bracket":
                 draw_bracket(
                     cax_left, start, end, axis="y", color=node_palette[group_name]
                 )
@@ -352,7 +367,7 @@ def adjacencyplot(
         cax_top.set_xticks(means.values)
         cax_top.tick_params(top=True, labeltop=True, bottom=False, labelbottom=False)
         ticklabels = cax_top.set_xticklabels(
-            means.index, rotation=45, fontsize="small", ha="left"
+            means.index, rotation=45, fontsize=label_fontsize, ha="left"
         )
         for label, color in zip(ticklabels, means.index.map(node_palette)):
             label.set_color(color)
@@ -389,33 +404,13 @@ def make_adjacency(synapses, cell_table, aggfunc="sum_size") -> csr_array:
 # sort nodes by their root_id label
 proofread_cell_info = proofread_cell_info.sort_index()
 adjacency = make_adjacency(synapses, proofread_cell_info, aggfunc="sum_size")
-ax, grid = adjacencyplot(
-    adjacency,
-    nodes=proofread_cell_info,
-    edge_palette="Greys",
-    size_by_weight=True,
-    hue_by_weight=True,
-    linewidth=0.05,
-    groupby_size="3%",
-    sizes=(1, 10),
-)
+ax, grid = adjacencyplot(adjacency)
 grid.set_ylabel("Presynaptic cell", fontsize="medium")
 grid.set_xlabel("Postsynaptic cell", fontsize="medium")
 
 # %%
 # sort by depth
-proofread_cell_info = proofread_cell_info.sort_values("pt_position_y")
-adjacency = make_adjacency(synapses, proofread_cell_info, aggfunc="sum_size")
-ax, grid = adjacencyplot(
-    adjacency,
-    nodes=proofread_cell_info,
-    edge_palette="Greys",
-    size_by_weight=True,
-    hue_by_weight=True,
-    linewidth=0.05,
-    groupby_size="3%",
-    sizes=(1, 10),
-)
+ax, grid = adjacencyplot(adjacency, nodes=proofread_cell_info, sortby="pt_position_y")
 grid.set_ylabel("Presynaptic cell", fontsize="medium")
 grid.set_xlabel("Postsynaptic cell", fontsize="medium")
 
@@ -423,10 +418,6 @@ grid.set_xlabel("Postsynaptic cell", fontsize="medium")
 
 node_hue = "cell_type_simple"
 
-# sort by E/I, then cell type within that, then by y position
-proofread_cell_info = proofread_cell_info.sort_values(
-    ["cell_type_coarse", node_hue, "pt_position_y"]
-)
 
 n_e_classes = len(
     proofread_cell_info.query("cell_type_coarse == 'E'")[node_hue].unique()
@@ -444,51 +435,43 @@ i_colors = sns.cubehelix_palette(
 )
 
 cell_type_palette = dict(
-    zip(proofread_cell_info[node_hue].unique(), e_colors + i_colors)
+    zip(
+        proofread_cell_info.sort_values(["cell_type_coarse", node_hue])[
+            node_hue
+        ].unique(),
+        e_colors + i_colors,
+    )
 )
 
 cell_type_palette["E"] = np.array(list(e_colors)).mean(axis=0)
 cell_type_palette["I"] = np.array(list(i_colors)).mean(axis=0)
 
-adjacency = make_adjacency(synapses, proofread_cell_info, aggfunc="sum_size")
 ax, grid = adjacencyplot(
     adjacency,
     nodes=proofread_cell_info,
     groupby=["cell_type_coarse", node_hue],
-    groupby_element="bracket",
+    sortby=["pt_position_y"],
     node_palette=cell_type_palette,
-    edge_palette="Greys",
-    size_by_weight=True,
-    hue_by_weight=True,
-    linewidth=0.05,
-    groupby_size="3%",
-    sizes=(1, 10),
 )
 grid.set_ylabel("Presynaptic cell", fontsize="large")
 grid.set_xlabel("Postsynaptic cell", fontsize="large")
 
 # %%
-fig, axs = plt.subplots(1, 3, figsize=(24, 8), layout="tight")
+fig, axs = plt.subplots(1, 3, figsize=(24, 8))
 connection_types = ["spine", "shaft", "soma"]
 for i, connection_type in enumerate(connection_types):
-    adjacency = make_adjacency(
+    connection_type_adjacency = make_adjacency(
         synapses.query(f"tag == '{connection_type}'"),
         proofread_cell_info,
         aggfunc="sum_size",
     )
     ax = axs[i]
     ax, grid = adjacencyplot(
-        adjacency,
+        connection_type_adjacency,
         nodes=proofread_cell_info,
         groupby=["cell_type_coarse", node_hue],
-        groupby_element="bracket",
+        sortby=["pt_position_y"],
         node_palette=cell_type_palette,
-        edge_palette="Greys",
-        size_by_weight=True,
-        hue_by_weight=True,
-        linewidth=0.05,
-        groupby_size="3%",
-        sizes=(1, 10),
         ax=ax,
     )
     grid.set_corner_title(
@@ -524,7 +507,6 @@ def make_edges(synapses, cell_table, map_columns=None):
         edges["target_" + map_column] = edges["target"].map(cell_table[map_column])
 
     return edges
-
 
 edges = make_edges(
     synapses,
@@ -592,3 +574,4 @@ ax.set_yticklabels(ax.get_yticklabels(), rotation=0)
 ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha="left")
 ax.set_xlabel("Postsynaptic cell type", fontsize="large")
 ax.set_ylabel("Presynaptic cell type", fontsize="large")
+
