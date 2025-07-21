@@ -10,3 +10,6 @@ wheels/
 .venv
 data/skeletons
 .DS_Store
+
+# Data files
+data/v1dd/*

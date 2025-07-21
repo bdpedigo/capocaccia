@@ -1,5 +1,6 @@
 # %%
 import time
+from pathlib import Path
 from typing import Union
 
 import numpy as np
@@ -17,38 +18,25 @@ version = 1169
 client = CAVEclient("v1dd", version=version)
 
 # %%
+data_path = Path(f"/Users/ben.pedigo/capocaccia/data/v1dd/{version}")
 
-cell_type_info = (
-    client.materialize.tables.cell_type_snds()
-    .query()
-    .drop_duplicates("pt_root_id")
-    .set_index("pt_root_id")
+cell_info = pd.read_feather(data_path / f"soma_cell_type_{version}.feather").set_index(
+    "pt_root_id"
 )
+cell_info["pt_position_x"] = cell_info["pt_position"].apply(lambda x: x[0])
+cell_info["pt_position_y"] = cell_info["pt_position"].apply(lambda x: x[1])
+cell_info["pt_position_z"] = cell_info["pt_position"].apply(lambda x: x[2])
 
-# %%
-
-proofreading_info = (
-    client.materialize.tables.proofreading_status_and_strategy()
-    .query(split_positions=True, desired_resolution=[1, 1, 1])
-    .drop_duplicates("pt_root_id")
-    .set_index("pt_root_id")
+proofread_axon_root_ids = np.load(data_path / f"proofread_axon_list_{version}.npy")
+proofread_dendrite_root_ids = np.load(
+    data_path / f"proofread_dendrite_list_{version}.npy"
 )
-
-# %%
-
-proofread_cell_info = proofreading_info.query("strategy_axon != 'none'")[
-    [
-        "strategy_axon",
-        "strategy_dendrite",
-        "pt_supervoxel_id",
-        "pt_position_x",
-        "pt_position_y",
-        "pt_position_z",
-    ]
-]
-proofread_cell_info = proofread_cell_info.join(
-    cell_type_info[["classification_system", "cell_type"]], how="inner"
+proofread_root_ids = np.intersect1d(
+    proofread_axon_root_ids, proofread_dendrite_root_ids
 )
+proofread_root_ids = cell_info.index.intersection(proofread_root_ids)
+
+proofread_cell_info = cell_info.loc[proofread_root_ids]
 
 proofread_cell_info["cell_type_simple"] = (
     proofread_cell_info["cell_type"].str.split("_").str[0]
@@ -116,14 +104,12 @@ class AxisGrid:
     def __init__(
         self,
         ax,
-        gap=False,
         spines=True,
     ):
         fig = ax.figure
         divider = make_axes_locatable(ax)
 
         self.spines = spines
-        self.gap = gap
 
         self.fig = fig
         self.ax = ax
@@ -176,14 +162,12 @@ class AxisGrid:
         #   pad, fraction_ref=axes_size.AxesX(self.ax)
         # )
         pad = f"{pad * 100}%"
-        ax = self.divider.append_axes(side, size=size, pad=pad, clip_on=False, **kwargs)
+        ax = self.divider.append_axes(side, size=size, pad=pad, **kwargs)
 
         clear_axis(ax)
-
         ax.tick_params(
             which="both",
             length=0,
-            width=0.5,
         )
 
         if side in ["top", "bottom"]:
@@ -259,7 +243,6 @@ def adjacencyplot(
     groupby=None,
     groupby_element="color",
     groupby_size="1%",
-    ascending=True,
     node_palette=None,
     edge_palette=None,
     ax=None,
@@ -310,8 +293,6 @@ def adjacencyplot(
     )
 
     ax.axis("square")
-
-    # ax.spines[["top", "right", "left", "bottom"]].set_visible(False)
     ax.set_xticks([])
     ax.set_yticks([])
     ax.set_xlim(-0.5, adjacency.shape[0] - 0.5)
@@ -322,6 +303,7 @@ def adjacencyplot(
     if groupby is None:
         groupby = []
 
+    # add groupby indicators starting from last to first
     for i, level in enumerate(groupby[::-1]):
         cax_left = grid.append_axes(
             "left", size=groupby_size, pad="auto", zorder=len(groupby) - i
@@ -403,9 +385,8 @@ def make_adjacency(synapses, cell_table, aggfunc="sum_size") -> csr_array:
     return adjacency
 
 
-# adjacencyplot(np.array([[1, 1], [1, 1]]), figsize=(4, 4), sizes=(100, 100))
-
 # %%
+# sort nodes by their root_id label
 proofread_cell_info = proofread_cell_info.sort_index()
 adjacency = make_adjacency(synapses, proofread_cell_info, aggfunc="sum_size")
 ax, grid = adjacencyplot(
@@ -422,6 +403,7 @@ grid.set_ylabel("Presynaptic cell", fontsize="medium")
 grid.set_xlabel("Postsynaptic cell", fontsize="medium")
 
 # %%
+# sort by depth
 proofread_cell_info = proofread_cell_info.sort_values("pt_position_y")
 adjacency = make_adjacency(synapses, proofread_cell_info, aggfunc="sum_size")
 ax, grid = adjacencyplot(
@@ -443,14 +425,14 @@ node_hue = "cell_type_simple"
 
 # sort by E/I, then cell type within that, then by y position
 proofread_cell_info = proofread_cell_info.sort_values(
-    ["classification_system", node_hue, "pt_position_y"]
+    ["cell_type_coarse", node_hue, "pt_position_y"]
 )
 
 n_e_classes = len(
-    proofread_cell_info.query("classification_system == 'exc'")[node_hue].unique()
+    proofread_cell_info.query("cell_type_coarse == 'E'")[node_hue].unique()
 )
 n_i_classes = len(
-    proofread_cell_info.query("classification_system == 'inh'")[node_hue].unique()
+    proofread_cell_info.query("cell_type_coarse == 'I'")[node_hue].unique()
 )
 
 e_colors = sns.cubehelix_palette(
@@ -465,14 +447,14 @@ cell_type_palette = dict(
     zip(proofread_cell_info[node_hue].unique(), e_colors + i_colors)
 )
 
-cell_type_palette["exc"] = np.array(list(e_colors)).mean(axis=0)
-cell_type_palette["inh"] = np.array(list(i_colors)).mean(axis=0)
+cell_type_palette["E"] = np.array(list(e_colors)).mean(axis=0)
+cell_type_palette["I"] = np.array(list(i_colors)).mean(axis=0)
 
 adjacency = make_adjacency(synapses, proofread_cell_info, aggfunc="sum_size")
 ax, grid = adjacencyplot(
     adjacency,
     nodes=proofread_cell_info,
-    groupby=["classification_system", node_hue],
+    groupby=["cell_type_coarse", node_hue],
     groupby_element="bracket",
     node_palette=cell_type_palette,
     edge_palette="Greys",
@@ -482,8 +464,8 @@ ax, grid = adjacencyplot(
     groupby_size="3%",
     sizes=(1, 10),
 )
-grid.set_ylabel("Presynaptic cell", fontsize="medium")
-grid.set_xlabel("Postsynaptic cell", fontsize="medium")
+grid.set_ylabel("Presynaptic cell", fontsize="large")
+grid.set_xlabel("Postsynaptic cell", fontsize="large")
 
 # %%
 fig, axs = plt.subplots(1, 3, figsize=(24, 8), layout="tight")
@@ -498,7 +480,7 @@ for i, connection_type in enumerate(connection_types):
     ax, grid = adjacencyplot(
         adjacency,
         nodes=proofread_cell_info,
-        groupby=["classification_system", node_hue],
+        groupby=["cell_type_coarse", node_hue],
         groupby_element="bracket",
         node_palette=cell_type_palette,
         edge_palette="Greys",
@@ -513,8 +495,8 @@ for i, connection_type in enumerate(connection_types):
         f"{connection_type.capitalize()}",
         fontsize=24,
     )
-    grid.set_ylabel("Presynaptic cell", fontsize="medium")
-    grid.set_xlabel("Postsynaptic cell", fontsize="medium")
+    grid.set_ylabel("Presynaptic cell", fontsize="large")
+    grid.set_xlabel("Postsynaptic cell", fontsize="large")
 
 
 # %%
@@ -547,7 +529,7 @@ def make_edges(synapses, cell_table, map_columns=None):
 edges = make_edges(
     synapses,
     proofread_cell_info,
-    map_columns=["classification_system", "cell_type_simple"],
+    map_columns=["cell_type_coarse", "cell_type_simple"],
 )
 edges
 
@@ -555,7 +537,7 @@ edges
 
 groupby = "cell_type_simple"
 
-categories = proofread_cell_info.sort_values(["classification_system", groupby])[
+categories = proofread_cell_info.sort_values(["cell_type_coarse", groupby])[
     groupby
 ].unique()
 
